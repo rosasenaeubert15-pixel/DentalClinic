@@ -16,6 +16,7 @@ import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { Save, X, Calendar, Clock, User, FileText, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+import { sendSMS } from '../../config/api';
 
 const PAYPAL_CLIENT_ID = "AQ7EOFkdAiFb_I8zfNh68kltLYpMD0TbvVeW212iPAd_iAivDQ1mYSqF6ATOEVPk_kbvPLQRx7sVWV_c";
 const RESERVATION_FEE = 10;
@@ -62,24 +63,14 @@ const sendAppointmentSMS = async (appointmentData) => {
     const message = `Hi ${patientName}! Your appointment for ${service} on ${appointmentDate} at ${appointmentTime} is ${status}. ${paymentNote} Thank you for choosing our clinic! - Dental Clinic`;
 
     // Send SMS via API
-    const response = await fetch('/api/send-sms', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        number: phoneNumber,
-        message: message,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("SMS API Error:", errorText);
-      return { success: false, error: errorText };
+    try {
+      const data = await sendSMS(phoneNumber, message);
+      console.log("SMS sent successfully:", data);
+      return { success: true, data };
+    } catch (error) {
+      console.error("SMS API Error:", error);
+      return { success: false, error: error.message };
     }
-
-    const data = await response.json();
-    console.log("SMS sent successfully:", data);
-    return { success: true, data };
 
   } catch (error) {
     console.error("Error sending appointment SMS:", error);
@@ -1765,23 +1756,14 @@ export default function PatientAppointment() {
                               const phoneNumber = patientInfo.contactNumber || patientInfo.phoneNumber || patientInfo.phone || null;
 
                               if (phoneNumber) {
-                                const message = `Hi ${patientName}! We regret to inform you that your appointment for ${apData?.treatment || ''} scheduled on ${apData?.date || ''} at ${apData?.time || ''} has been CANCELLED. Please contact us to reschedule.`;
-                                try {
-                                  const resp = await fetch('/api/send-sms', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ number: phoneNumber, message })
-                                  });
-                                  if (!resp.ok) {
-                                    const text = await resp.text();
-                                    console.warn('SMS API responded with error:', text);
-                                  } else {
-                                    console.log('Cancellation SMS queued/sent');
-                                  }
-                                } catch (smsErr) {
-                                  console.error('Failed to call SMS API', smsErr);
-                                }
+                              const message = `Hi ${patientName}! We regret to inform you that your appointment for ${apData?.treatment || ''} scheduled on ${apData?.date || ''} at ${apData?.time || ''} has been CANCELLED. Please contact us to reschedule.`;
+                              try {
+                                await sendSMS(phoneNumber, message);
+                                console.log('Cancellation SMS sent successfully');
+                              } catch (smsErr) {
+                                console.error('Failed to send cancellation SMS', smsErr);
                               }
+                            }
                             } catch (phoneErr) {
                               console.warn('Failed to fetch patient phone', phoneErr);
                             }

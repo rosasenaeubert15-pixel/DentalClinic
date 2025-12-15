@@ -10,7 +10,7 @@ import {
 import { onAuthStateChanged } from "firebase/auth";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-
+import { sendSMS } from '../../config/api';
 export default function Notifications({ userRole, onNotificationViewed }) {
   const effectiveRole = userRole || "admin";
 
@@ -475,58 +475,28 @@ export default function Notifications({ userRole, onNotificationViewed }) {
   };
 
   const handleSendSms = async ({ phoneNumber, message }) => {
-    if (!phoneNumber || !message) {
-      toast.error("Phone number and message are required!");
-      return;
-    }
-    setSmsSending(true);
-    try {
-      const response = await fetch('http://localhost:3001/api/send-sms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          number: phoneNumber,
-          message: message,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("SMS API Error:", errorText);
-        toast.error(`Failed to send SMS: ${response.status}`);
-        return;
-      }
-
-      let data;
-      const contentType = response.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        data = await response.json();
-      } else {
-        const textResponse = await response.text();
-        try {
-          data = JSON.parse(textResponse);
-        } catch {
-          data = { success: true };
-        }
-      }
-
-      if (data.success) {
-        toast.success("SMS sent successfully");
-        setSmsModalOpen(false);
-        setSmsPhone("");
-        setSmsMessage("");
-        setSmsTemplate("custom");
-        setSelectedPatient("");
-      } else {
-        toast.error("Failed to send SMS: " + (data.error || "Unknown error"));
-      }
-    } catch (error) {
-      console.error("SMS Error:", error);
-      toast.error("Error sending SMS: " + error.message);
-    } finally {
-      setSmsSending(false);
-    }
-  };
+  if (!phoneNumber || !message) {
+    toast.error("Phone number and message are required!");
+    return;
+  }
+  setSmsSending(true);
+  try {
+    const data = await sendSMS(phoneNumber, message);
+    console.log("SMS sent successfully:", data);
+    
+    toast.success("SMS sent successfully");
+    setSmsModalOpen(false);
+    setSmsPhone("");
+    setSmsMessage("");
+    setSmsTemplate("custom");
+    setSelectedPatient("");
+  } catch (error) {
+    console.error("SMS Error:", error);
+    toast.error("Error sending SMS: " + error.message);
+  } finally {
+    setSmsSending(false);
+  }
+};
 
   // Filter by status and search
   const filteredNotifications = notifications.filter((notif) => {

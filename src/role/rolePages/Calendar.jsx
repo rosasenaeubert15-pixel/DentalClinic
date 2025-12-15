@@ -4,6 +4,7 @@ import { collection, query, onSnapshot, orderBy,getDocs,addDoc,updateDoc,deleteD
 import { db, auth } from '../../../firebase.config';
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import { sendSMS } from '../../config/api'; 
 
 
 // ============ SMS SENDING FUNCTION ============
@@ -34,25 +35,9 @@ const sendStatusSMS = async (phoneNumber, patientName, status, appointmentData) 
       return { success: false, reason: "Unknown status" };
     }
 
-    const response = await fetch("http://localhost:3001/api/send-sms", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        number: phoneNumber,
-        message: message,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("SMS API Error:", errorText);
-      toast.error("Failed to send SMS.");
-      return { success: false, error: errorText };
-    }
-
-    const data = await response.json();
-    toast.success("SMS sent successfully!");
-    return { success: true, data };
+const data = await sendSMS(phoneNumber, message);
+toast.success("SMS sent successfully!");
+return { success: true, data };
 
   } catch (error) {
     console.error("Error sending status SMS:", error);
@@ -1405,16 +1390,12 @@ export default function AdminCalendar({ onAppointmentViewed }) {
 
                 if (phoneNumber) {
                   const message = `Hi ${patientName}! Thank you for completing your ${apptData.treatment || ''} appointment on ${apptData.date || ''}. We hope you're satisfied with our service.`;
-                  const resp = await fetch('/api/send-sms', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ number: phoneNumber, message })
-                  });
-                  if (!resp.ok) {
-                    const txt = await resp.text();
-                    console.warn('SMS API error (treated):', txt);
-                  } else {
-                    console.log('Treated SMS sent/queued');
+                  
+                  try {
+                    await sendSMS(phoneNumber, message);
+                    console.log('Treated SMS sent successfully');
+                  } catch (error) {
+                    console.warn('Failed to send treated SMS:', error);
                   }
                 }
               } catch (smsErr) {

@@ -16,7 +16,7 @@ import { db, auth } from "../../../firebase.config";
 import { onAuthStateChanged } from "firebase/auth";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-
+import { sendSMS } from '../../config/api'; 
 // Price list from PatientAppointment.jsx
 const treatments = [
   {
@@ -186,25 +186,16 @@ const sendBillingPaymentSMS = async (paymentData) => {
 
     const message = `Hi ${patientName}! Payment received on ${paymentTime}. Amount: ₱${amount} for ${treatment}. Transaction ID: ${txId}. Thank you for choosing our clinic! - Dental Clinic`;
 
-    // Send SMS via API
-    const response = await fetch('/api/send-sms', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        number: phoneNumber,
-        message: message,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("SMS API Error:", errorText);
-      return { success: false, error: errorText };
+  
+   // Send SMS via API
+    try {
+      const data = await sendSMS(phoneNumber, message);
+      console.log("Payment SMS sent successfully:", data);
+      return { success: true, data };
+    } catch (error) {
+      console.error("SMS API Error:", error);
+      return { success: false, error: error.message };
     }
-
-    const data = await response.json();
-    console.log("Payment SMS sent successfully:", data);
-    return { success: true, data };
 
   } catch (error) {
     console.error("Error sending payment SMS:", error);
