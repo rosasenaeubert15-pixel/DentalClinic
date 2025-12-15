@@ -1,0 +1,1074 @@
+import { useState, useEffect, useRef } from 'react';
+import { 
+  ChevronLeft, 
+  ChevronRight,
+  Plus,
+  X,
+  Pencil,
+  Trash2,
+  Heart
+} from 'lucide-react';
+import { 
+  collection, 
+  query, 
+  onSnapshot, 
+  orderBy,
+  getDocs,
+  doc,
+  updateDoc,
+  deleteDoc,
+  addDoc,
+  serverTimestamp,
+  where
+} from 'firebase/firestore';
+import { db, auth } from '../../../firebase.config';
+
+const TIME_SLOTS = [
+  "10:00 - 10:30", "10:30 - 11:00", "11:00 - 11:30", "11:30 - 12:00",
+  "12:00 - 12:30", "12:30 - 13:00", "13:00 - 13:30", "13:30 - 14:00",
+  "14:00 - 14:30", "14:30 - 15:00", "15:00 - 15:30", "15:30 - 16:00",
+  "16:00 - 16:30", "16:30 - 17:00"
+];
+
+const colorOptions = [
+  { name: "Blue", value: "#3b82f6" },
+  { name: "Red", value: "#ef4444" },
+  { name: "Green", value: "#10b981" },
+  { name: "Purple", value: "#8b5cf6" },
+  { name: "Orange", value: "#f97316" },
+  { name: "Pink", value: "#ec4899" }
+];
+
+// Health questions
+const healthQuestionsList = [
+  { id: "q1", text: "Do you have a fever or temperature over 38°C?" },
+  { id: "q2", text: "Have you experienced shortness of breath?" },
+  { id: "q3", text: "Do you have a dry cough?" },
+  { id: "q4", text: "Do you have runny nose?" },
+  { id: "q5", text: "Have you recently lost or had a reduction in your sense of smell?" },
+  { id: "q6", text: "Do you have sore throat?" },
+  { id: "q7", text: "Do you have diarrhea?" },
+  { id: "q8", text: "Do you have influenza-like symptoms?" },
+  { id: "q9", text: "Do you have history of COVID-19 infection?" },
+  { id: "q10", text: "Have you been in contact with someone who tested positive for COVID-19?" }
+];
+
+// Treatments list
+const treatments = [
+  {
+    category: "Cleaning (LINIS)",
+    options: [
+      { type: "Mild to Average Deposit (Tartar)", price: 650, time: 30 },
+      { type: "Moderate to Heavy Deposit", price: 900, time: 60 }
+    ]
+  },
+  {
+    category: "Filling (PASTA)",
+    options: [
+      { type: "Temporary", price: 400, time: 30 },
+      { type: "Permanent", price: 1150, time: 60 }
+    ]
+  },
+  {
+    category: "Tooth Extraction (BUNOT)",
+    options: [
+      { type: "Regular", price: 600, time: 30 },
+      { type: "Complicated", price: 1000, time: 60 }
+    ]
+  }
+];
+
+export default function AppointmentManagement({ onAppointmentViewed }) {
+    // Patient dropdown search states and logic (from AI.jsx)
+    const [patientSearch, setPatientSearch] = useState('');
+    const [showPatientDropdown, setShowPatientDropdown] = useState(false);
+    const [selectedPatientName, setSelectedPatientName] = useState('');
+    const patientDropdownRef = useRef(null);
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+      const handleClickOutside = (e) => {
+        if (patientDropdownRef.current && !patientDropdownRef.current.contains(e.target)) {
+          setShowPatientDropdown(false);
+        }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }, []);
+
+    // Patient dropdown UI for walk-in (from AI.jsx)
+    const renderPatientDropdown = () => {
+      // Only show users with role 'patient'
+      const patientList = Object.entries(users)
+        .filter(([id, data]) => data?.role === 'patient')
+        .map(([id, data]) => ({
+          id,
+          name: `${data?.firstName || ''} ${data?.lastName || ''}`.trim() || data?.name || 'Unnamed Patient',
+          email: data?.email || '',
+          phone: data?.contactNumber || data?.phoneNumber || ''
+        }));
+
+      const filtered = patientList.filter(p =>
+        p.name.toLowerCase().includes(patientSearch.toLowerCase()) ||
+        p.email.toLowerCase().includes(patientSearch.toLowerCase())
+      );
+
+      return (
+        <div className="relative" ref={patientDropdownRef}>
+          <input
+            type="text"
+            placeholder="Search patient name or email..."
+            value={patientSearch}
+            onChange={e => setPatientSearch(e.target.value)}
+            onFocus={() => setShowPatientDropdown(true)}
+            className="w-full px-3 py-2 border border-gray-400 rounded text-sm focus:border-blue-600 focus:ring-1 focus:ring-blue-600 bg-white"
+          />
+          {/* Selected Patient Display */}
+          {form.patientId && (
+            <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-sm text-gray-700">
+              <span className="font-medium">Selected:</span> {selectedPatientName}
+            </div>
+          )}
+          {/* Dropdown Results */}
+          {showPatientDropdown && (
+            <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded shadow-lg">
+              {filtered.length > 0 ? (
+                <ul className="max-h-48 overflow-y-auto">
+                  {filtered.map((p) => (
+                    <li
+                      key={p.id}
+                      onClick={() => {
+                        setForm(f => ({ ...f, patientId: p.id, patientEmail: p.email, patientPhone: p.phone }));
+                        setSelectedPatientName(p.name);
+                        setPatientSearch('');
+                        setShowPatientDropdown(false);
+                      }}
+                      className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b last:border-b-0"
+                    >
+                      <div className="font-medium text-sm text-gray-800">{p.name}</div>
+                      <div className="text-xs text-gray-500">{p.email}</div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="px-3 py-3 text-sm text-gray-500 text-center">
+                  No patients found
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    };
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [appointments, setAppointments] = useState([]);
+  const [onlineRequests, setOnlineRequests] = useState([]);
+  const [users, setUsers] = useState({});
+  const [dentists, setDentists] = useState({});
+  const [walkInType, setWalkInType] = useState('online');
+  const [showAddWalkInModal, setShowAddWalkInModal] = useState(false);
+  const [queuedAppointments, setQueuedAppointments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [selectedOption, setSelectedOption] = useState(null);
+  const [availableSlots, setAvailableSlots] = useState(TIME_SLOTS);
+  
+  const [form, setForm] = useState({
+    patientId: '',
+    patientEmail: '',
+    patientPhone: '',
+    providerId: '',
+    appointmentDate: '',
+    slot: '',
+    healthDeclaration: '',
+    status: 'confirmed',
+    color: '#3b82f6'
+  });
+
+  const [healthAnswers, setHealthAnswers] = useState(
+    healthQuestionsList.reduce((acc, q) => ({ ...acc, [q.id]: '' }), {})
+  );
+
+  const mountedRef = useRef(true);
+
+  // Normalize date helper
+  const normalizeDateString = (raw) => {
+    if (!raw && raw !== 0) return '';
+    try {
+      if (typeof raw === 'object' && typeof raw.toDate === 'function') {
+        const d = raw.toDate();
+        return d.toISOString().split('T')[0];
+      }
+      if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        return raw;
+      }
+      const d = new Date(raw);
+      if (!isNaN(d.getTime())) {
+        return d.toISOString().split('T')[0];
+      }
+    } catch (e) {
+      // fallthrough
+    }
+    return String(raw);
+  };
+
+  // CreatedAt helper (returns milliseconds) and comparator to ensure newest items are first
+  const getCreatedAtMs = (raw) => {
+    if (!raw) return 0;
+    const c = raw.createdAt || raw.created_at || raw.createdAtMs;
+    if (!c) return 0;
+    try {
+      if (typeof c.toMillis === 'function') return c.toMillis();
+      if (typeof c.toDate === 'function') return c.toDate().getTime();
+      const d = new Date(c);
+      if (!isNaN(d.getTime())) return d.getTime();
+    } catch (e) {}
+    return 0;
+  };
+
+  const compareAppointments = (a, b) => {
+    const aMs = getCreatedAtMs(a);
+    const bMs = getCreatedAtMs(b);
+    if (aMs !== bMs) return bMs - aMs; // newer first
+
+    // fallback: compare by date (YYYY-MM-DD) then time
+    if (a.date && b.date && a.date !== b.date) return b.date.localeCompare(a.date);
+    if (a.time && b.time && a.time !== b.time) return b.time.localeCompare(a.time);
+    return 0;
+  };
+
+  // Fetch users
+  useEffect(() => {
+    async function loadUsers() {
+      try {
+        // Only fetch users with role 'patient' from Firestore
+        const q = query(collection(db, 'users'));
+        const snap = await getDocs(q);
+        const data = {};
+        snap.forEach((d) => (data[d.id] = d.data()));
+        setUsers(data);
+      } catch (error) {
+        console.error('Error loading users:', error);
+      }
+    }
+    loadUsers();
+  }, []);
+
+  // Fetch dentists
+  useEffect(() => {
+    async function loadDentists() {
+      try {
+        const snap = await getDocs(collection(db, 'dentists'));
+        const data = {};
+        snap.forEach((d) => (data[d.id] = d.data()));
+        setDentists(data);
+      } catch (error) {
+        console.error('Error loading dentists:', error);
+      }
+    }
+    loadDentists();
+  }, []);
+
+  // Subscribe to onlineRequests
+  useEffect(() => {
+    const q = query(collection(db, 'onlineRequests'), orderBy('date', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((doc) => {
+        const raw = doc.data();
+        const dateNormalized = normalizeDateString(raw.date || raw.appointmentDate);
+        const docId = `online_${doc.id}`;
+        
+        // Mark as viewed when loaded
+        if (typeof onAppointmentViewed === 'function') {
+          onAppointmentViewed(docId);
+        }
+        
+        return { id: doc.id, ...raw, date: dateNormalized };
+      });
+      // Ensure newest entries appear first
+      data.sort(compareAppointments);
+      setOnlineRequests(data);
+    }, (error) => {
+      console.error('Error fetching online requests:', error);
+    });
+
+    return () => unsubscribe();
+  }, [onAppointmentViewed]);
+
+  // Subscribe to appointments (walk-in)
+  useEffect(() => {
+    const q = query(collection(db, 'appointments'), orderBy('date', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((doc) => {
+        const raw = doc.data();
+        const dateNormalized = normalizeDateString(raw.date || raw.appointmentDate);
+        const timeField = raw.time || raw.slot || '';
+        const docId = `apt_${doc.id}`;
+        
+        // Mark as viewed when loaded
+        if (typeof onAppointmentViewed === 'function') {
+          onAppointmentViewed(docId);
+        }
+        
+        return { id: doc.id, ...raw, date: dateNormalized, time: timeField };
+      });
+      // Ensure newest entries appear first
+      data.sort(compareAppointments);
+      setAppointments(data);
+      setLoading(false);
+    }, (error) => {
+      console.error('Error fetching appointments:', error);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [onAppointmentViewed]);
+
+  // Update queued appointments when data changes
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const combined = [...onlineRequests, ...appointments];
+    const todayAppts = combined
+      .filter(apt => apt.date === today && apt.status === 'confirmed')
+      .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    setQueuedAppointments(todayAppts);
+  }, [onlineRequests, appointments]);
+
+  const combinedAppointments = [...onlineRequests, ...appointments].sort(compareAppointments);
+
+  // Count by status
+  const countByStatus = (status) => {
+    return combinedAppointments.filter(a => 
+      (a.status || '').toLowerCase() === status.toLowerCase()
+    ).length;
+  };
+
+  const allCount = combinedAppointments.length;
+  const pendingCount = countByStatus('pending');
+  const confirmedCount = countByStatus('confirmed');
+  const treadedCount = countByStatus('treated');
+  const cancelledCount = countByStatus('cancelled');
+  const rescheduleCount = countByStatus('reschedule');
+
+  // Get patient name helper
+  const getPatientName = (appointment) => {
+    if (appointment.userId && users[appointment.userId]) {
+      const user = users[appointment.userId];
+      return `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown';
+    }
+    if (appointment.patientName) return appointment.patientName;
+    return 'Unknown Patient';
+  };
+
+  // Calendar functions
+  const getDaysInMonth = (date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startingDayOfWeek = firstDay.getDay();
+    return { daysInMonth, startingDayOfWeek, year, month };
+  };
+
+  const changeMonth = (direction) => {
+    setCurrentDate(prev => {
+      const newDate = new Date(prev);
+      newDate.setMonth(prev.getMonth() + direction);
+      return newDate;
+    });
+  };
+
+  const goToToday = () => {
+    setCurrentDate(new Date());
+  };
+
+  const formatMonthYear = (date) => {
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+  };
+
+  const handleCheckAppointment = (id) => {
+    setQueuedAppointments(prev => prev.filter(apt => apt.id !== id));
+  };
+
+  // Compute available slots
+  const computeAvailableSlots = async (dateStr, providerId) => {
+    try {
+      const walkInQ = query(collection(db, 'appointments'), where('date', '==', dateStr), where('providerId', '==', providerId));
+      const onlineQ = query(collection(db, 'onlineRequests'), where('date', '==', dateStr));
+      
+      const [walkInSnap, onlineSnap] = await Promise.all([
+        getDocs(walkInQ),
+        getDocs(onlineQ)
+      ]);
+
+      const blocked = new Set();
+      const allowedStatuses = new Set(['confirmed', 'paid']);
+
+      walkInSnap.forEach((d) => {
+        const ap = d.data();
+        if (!allowedStatuses.has((ap.status || '').toLowerCase())) return;
+        const idx = TIME_SLOTS.indexOf(ap.time);
+        const apSlots = Math.ceil((ap.duration || 30) / 30);
+        if (idx < 0) return;
+        for (let i = idx; i < idx + apSlots && i < TIME_SLOTS.length; i++) {
+          blocked.add(TIME_SLOTS[i]);
+        }
+      });
+
+      onlineSnap.forEach((d) => {
+        const ap = d.data();
+        if (!allowedStatuses.has((ap.status || '').toLowerCase())) return;
+        const idx = TIME_SLOTS.indexOf(ap.time);
+        const apSlots = Math.ceil((ap.duration || 30) / 30);
+        if (idx < 0) return;
+        for (let i = idx; i < idx + apSlots && i < TIME_SLOTS.length; i++) {
+          blocked.add(TIME_SLOTS[i]);
+        }
+      });
+
+      if (selectedOption) {
+        const slotsNeeded = Math.ceil((selectedOption.time || 30) / 30);
+        const canUse = TIME_SLOTS.filter((_, idx) => {
+          if (idx + slotsNeeded > TIME_SLOTS.length) return false;
+          for (let i = 0; i < slotsNeeded; i++) {
+            if (blocked.has(TIME_SLOTS[idx + i])) return false;
+          }
+          return true;
+        });
+        setAvailableSlots(canUse.length ? canUse : []);
+      } else {
+        setAvailableSlots(TIME_SLOTS.filter((s) => !blocked.has(s)));
+      }
+    } catch (e) {
+      console.error('computeAvailableSlots error:', e);
+      setAvailableSlots(TIME_SLOTS.slice());
+    }
+  };
+
+  useEffect(() => {
+    if (!form.appointmentDate || !form.providerId) {
+      setAvailableSlots(TIME_SLOTS.slice());
+      return;
+    }
+    computeAvailableSlots(form.appointmentDate, form.providerId);
+  }, [form.appointmentDate, form.providerId, selectedOption]);
+
+  // Add walk-in appointment
+  const handleAddAppointment = async (e) => {
+    e.preventDefault();
+    
+    try {
+      if (!form.patientId) {
+        alert('Please select a patient.');
+        return;
+      }
+      if (!selectedCategory || !selectedOption) {
+        alert('Please select a service and option.');
+        return;
+      }
+      if (!form.providerId) {
+        alert('Select a dentist.');
+        return;
+      }
+      if (!form.appointmentDate) {
+        alert('Select an appointment date.');
+        return;
+      }
+      if (!form.slot) {
+        alert('Select a time slot.');
+        return;
+      }
+
+      const unanswered = Object.values(healthAnswers).some((v) => v !== 'yes' && v !== 'no');
+      if (unanswered) {
+        alert('Please answer all health questions.');
+        return;
+      }
+
+      const patient = Object.values(users).find((p) => p.id === form.patientId || Object.keys(users).find(id => id === form.patientId));
+      const patientData = users[form.patientId];
+      const patientName = patientData ? `${patientData.firstName || ''} ${patientData.lastName || ''}`.trim() : 'Walk-in Patient';
+
+      const appointmentPayload = {
+        userId: form.patientId || null,
+        patientName: patientName,
+        patientEmail: form.patientEmail || '',
+        patientPhone: form.patientPhone || '',
+        providerId: form.providerId,
+        preferredDentist: form.providerId,
+        date: form.appointmentDate,
+        time: form.slot,
+        duration: selectedOption.time || 30,
+        treatment: selectedCategory.category || '',
+        treatmentOption: `${selectedCategory.category} - ${selectedOption.type}`,
+        price: Number(selectedOption.price || 0),
+        healthDeclaration: form.healthDeclaration || '',
+        health: {
+          questions: healthQuestionsList.map(({ id, text }) => ({ id, text })),
+          answers: healthAnswers
+        },
+        status: form.status || 'confirmed',
+        color: form.color || '#3b82f6',
+        createdAt: serverTimestamp(),
+        createdBy: auth?.currentUser?.uid || null
+      };
+
+      await addDoc(collection(db, 'appointments'), appointmentPayload);
+
+      alert('Walk-in appointment created successfully!');
+      setShowAddWalkInModal(false);
+      resetForm();
+    } catch (err) {
+      console.error('Error creating appointment:', err);
+      alert('Failed to create appointment');
+    }
+  };
+
+  const resetForm = () => {
+    setSelectedCategory(null);
+    setSelectedOption(null);
+    setForm({
+      patientId: '',
+      patientEmail: '',
+      patientPhone: '',
+      providerId: '',
+      appointmentDate: '',
+      slot: '',
+      healthDeclaration: '',
+      status: 'confirmed',
+      color: '#3b82f6'
+    });
+    setHealthAnswers(healthQuestionsList.reduce((acc, q) => ({ ...acc, [q.id]: '' }), {}));
+  };
+
+  const handlePatientSelect = (id) => {
+    const p = users[id];
+    if (p) {
+      setForm((f) => ({
+        ...f,
+        patientId: id,
+        patientEmail: p.email || '',
+        patientPhone: p.contactNumber || p.phoneNumber || ''
+      }));
+    } else {
+      setForm((f) => ({ ...f, patientId: '', patientEmail: '', patientPhone: '' }));
+    }
+  };
+
+  const renderCalendar = () => {
+    const { daysInMonth, startingDayOfWeek, year, month } = getDaysInMonth(currentDate);
+    const days = [];
+    const weekDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    for (let i = 0; i < startingDayOfWeek; i++) {
+      days.push(<div key={`empty-${i}`} className="h-20 bg-gray-100"></div>);
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const dayOfWeek = new Date(year, month, day).getDay();
+      const isSunday = dayOfWeek === 0;
+      const isToday = new Date().toDateString() === new Date(year, month, day).toDateString();
+
+      days.push(
+        <div 
+          key={day}
+          className={`h-20 border border-gray-300 p-1 text-center ${
+            isSunday ? 'bg-gray-200 text-gray-400' : 'bg-white'
+          } ${isToday ? 'ring-2 ring-blue-500' : ''}`}
+        >
+          <div className={`text-sm font-semibold ${isSunday ? 'text-red-500' : 'text-gray-700'}`}>
+            {day}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <div className="grid grid-cols-7 gap-0 border-t border-l border-gray-300">
+          {weekDays.map(day => (
+            <div key={day} className="bg-gray-50 border-r border-b border-gray-300 p-2 text-center font-semibold text-sm text-gray-700">
+              {day}
+            </div>
+          ))}
+          {days}
+        </div>
+      </div>
+    );
+  };
+
+  const walkInData = walkInType === 'online' ? onlineRequests : appointments;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-500">Loading appointments...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Top Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Left: Appointments Stats */}
+          <div className="bg-white rounded-lg shadow p-4">
+            <h2 className="text-xl font-bold mb-4">Appointments</h2>
+            
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <button className="border-2 border-gray-300 rounded-lg p-4 text-center hover:bg-gray-50 transition-colors">
+                <div className="text-3xl font-bold text-gray-700">{allCount}</div>
+                <div className="text-sm text-gray-600">ALL</div>
+              </button>
+              
+              <button className="border-2 border-yellow-400 rounded-lg p-4 text-center hover:bg-yellow-50 transition-colors">
+                <div className="text-3xl font-bold text-yellow-600">{pendingCount}</div>
+                <div className="text-sm text-gray-600">PENDING</div>
+              </button>
+              
+              <button className="border-2 border-green-400 rounded-lg p-4 text-center hover:bg-green-50 transition-colors">
+                <div className="text-3xl font-bold text-green-600">{confirmedCount}</div>
+                <div className="text-sm text-gray-600">CONFIRMED</div>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <button className="border-2 border-blue-400 rounded-lg p-4 text-center hover:bg-blue-50 transition-colors">
+                <div className="text-3xl font-bold text-blue-600">{treadedCount}</div>
+                <div className="text-sm text-gray-600">TREADED</div>
+              </button>
+              
+              <button className="border-2 border-red-400 rounded-lg p-4 text-center hover:bg-red-50 transition-colors">
+                <div className="text-3xl font-bold text-red-600">{cancelledCount}</div>
+                <div className="text-sm text-gray-600">CANCELLED</div>
+              </button>
+              
+              <button className="border-2 border-purple-400 rounded-lg p-4 text-center hover:bg-purple-50 transition-colors">
+                <div className="text-3xl font-bold text-purple-600">{rescheduleCount}</div>
+                <div className="text-sm text-gray-600">RESCHEDULE</div>
+              </button>
+            </div>
+          </div>
+
+          {/* Right: Total Queuing */}
+          <div className="bg-white rounded-lg shadow p-4">
+            <h2 className="text-xl font-bold mb-4">Total Queuing: {queuedAppointments.length}</h2>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left p-2 border">Patient</th>
+                    <th className="text-left p-2 border">Time</th>
+                    <th className="text-left p-2 border">Treatment</th>
+                    <th className="text-center p-2 border">✓</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {queuedAppointments.length === 0 ? (
+                    <tr>
+                      <td colSpan="4" className="text-center p-4 text-gray-500">
+                        No appointments in queue
+                      </td>
+                    </tr>
+                  ) : (
+                    queuedAppointments.map(apt => (
+                      <tr key={apt.id} className="hover:bg-gray-50">
+                        <td className="p-2 border">{getPatientName(apt)}</td>
+                        <td className="p-2 border">{apt.time}</td>
+                        <td className="p-2 border">{apt.treatment}</td>
+                        <td className="p-2 border text-center">
+                          <input
+                            type="checkbox"
+                            className="w-5 h-5 cursor-pointer"
+                            onChange={() => handleCheckAppointment(apt.id)}
+                          />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Left: Calendar */}
+          <div className="bg-white rounded-lg shadow p-4">
+            <h2 className="text-xl font-bold mb-4">Calendar</h2>
+            
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => changeMonth(-1)}
+                  className="p-2 hover:bg-gray-100 rounded border"
+                >
+                  <ChevronLeft size={20} />
+                </button>
+                <button
+                  onClick={() => changeMonth(1)}
+                  className="p-2 hover:bg-gray-100 rounded border"
+                >
+                  <ChevronRight size={20} />
+                </button>
+                <button
+                  onClick={goToToday}
+                  className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+                >
+                  Today
+                </button>
+                <span className="ml-2 font-semibold text-gray-700">
+                  {formatMonthYear(currentDate)}
+                </span>
+              </div>
+
+              <div className="flex gap-2">
+                <button className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
+                  Month
+                </button>
+                <button className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300">
+                  Week
+                </button>
+                <button className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300">
+                  Day
+                </button>
+                <button className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300">
+                  List
+                </button>
+              </div>
+            </div>
+
+            {renderCalendar()}
+          </div>
+
+          {/* Right: Walk In Section */}
+          <div className="bg-white rounded-lg shadow p-4">
+            <div className="flex items-center justify-between mb-4">
+              <select
+                value={walkInType}
+                onChange={(e) => setWalkInType(e.target.value)}
+                className="px-4 py-2 border border-gray-300 rounded bg-blue-100 text-gray-700 font-medium cursor-pointer"
+              >
+                <option value="online">Online</option>
+                <option value="walkin">Walk In</option>
+              </select>
+
+              <button
+                onClick={() => setShowAddWalkInModal(true)}
+                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 flex items-center gap-2 font-medium"
+              >
+                <Plus size={20} />
+                Add Walk In +
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="text-left p-2 border">Patient</th>
+                    <th className="text-left p-2 border">Time</th>
+                    <th className="text-left p-2 border">Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {walkInData.length === 0 ? (
+                    <tr>
+                      <td colSpan="3" className="text-center p-4 text-gray-500">
+                        No {walkInType} appointments
+                      </td>
+                    </tr>
+                  ) : (
+                    walkInData.map(apt => (
+                      <tr key={apt.id} className="hover:bg-gray-50">
+                        <td className="p-2 border">{getPatientName(apt)}</td>
+                        <td className="p-2 border">{apt.time}</td>
+                        <td className="p-2 border">{apt.date}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Add Walk In Modal */}
+      {showAddWalkInModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold">Add Walk-in Appointment</h3>
+              <button
+                onClick={() => {
+                  setShowAddWalkInModal(false);
+                  resetForm();
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Patient Selection */}
+              <div className="border-b pb-3">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Patient Information</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-600 block mb-1">Select Patient *</label>
+                    {/* Searchable dropdown for patient selection, only 'patient' role */}
+                    {renderPatientDropdown()}
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-600 block mb-1">Email</label>
+                    <input
+                      value={form.patientEmail}
+                      readOnly
+                      className="w-full p-2 border rounded bg-gray-100 text-sm"
+                      placeholder="Auto-filled"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-600 block mb-1">Phone</label>
+                    <input
+                      value={form.patientPhone}
+                      readOnly
+                      className="w-full p-2 border rounded bg-gray-100 text-sm"
+                      placeholder="Auto-filled"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Service Selection */}
+              <div className="border-b pb-3">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Service / Treatment</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-600 block mb-1">Select Service *</label>
+                    <select
+                      value={selectedCategory?.category || ''}
+                      onChange={(e) => {
+                        const t = treatments.find((x) => x.category === e.target.value);
+                        setSelectedCategory(t || null);
+                        setSelectedOption(null);
+                      }}
+                      className="w-full p-2 border rounded text-sm"
+                    >
+                      <option value="">-- Select Service --</option>
+                      {treatments.map((t) => (
+                        <option key={t.category} value={t.category}>{t.category}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-600 block mb-1">Select Option *</label>
+                    <select
+                      value={selectedOption?.type || ''}
+                      onChange={(e) => {
+                        const opt = selectedCategory?.options?.find((o) => o.type === e.target.value);
+                        setSelectedOption(opt || null);
+                      }}
+                      className="w-full p-2 border rounded text-sm"
+                      disabled={!selectedCategory}
+                    >
+                      <option value="">{selectedCategory ? 'Choose option' : 'Select service first'}</option>
+                      {selectedCategory?.options?.map((o) => (
+                        <option key={o.type} value={o.type}>
+                          {o.type} — ₱{o.price} ({o.time} min)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {selectedOption && (
+                  <div className="mt-2 p-2 bg-blue-50 rounded text-sm">
+                    <strong>Price:</strong> ₱{selectedOption.price} | <strong>Duration:</strong> {selectedOption.time} minutes
+                  </div>
+                )}
+              </div>
+
+              {/* Appointment Details */}
+              <div className="border-b pb-3">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Appointment Schedule</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-600 block mb-1">Select Doctor *</label>
+                    <select
+                      value={form.providerId}
+                      onChange={(e) => setForm({...form, providerId: e.target.value, slot: ''})}
+                      className="w-full p-2 border rounded text-sm"
+                    >
+                      <option value="">-- Select Dentist --</option>
+                      {Object.entries(dentists).map(([id, d]) => (
+                        <option key={id} value={id}>
+                          {d.fullName || d.name || id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-600 block mb-1">Appointment Date *</label>
+                    <input
+                      type="date"
+                      value={form.appointmentDate}
+                      onChange={(e) => setForm({...form, appointmentDate: e.target.value, slot: ''})}
+                      min={new Date().toISOString().split('T')[0]}
+                      className="w-full p-2 border rounded text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-600 block mb-1">
+                      Time Slot * {selectedOption && `(${selectedOption.time} min needed)`}
+                    </label>
+                    <select
+                      value={form.slot}
+                      onChange={(e) => setForm({...form, slot: e.target.value})}
+                      className="w-full p-2 border rounded text-sm"
+                      disabled={!form.appointmentDate || !selectedOption}
+                    >
+                      <option value="">-- Select Time --</option>
+                      {availableSlots.length === 0 ? (
+                        <option value="">No available slots</option>
+                      ) : (
+                        availableSlots.map((s) => <option key={s} value={s}>{s}</option>)
+                      )}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Health Declaration */}
+              <div className="border-b pb-3">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                  <Heart className="text-red-600" size={16} />
+                  Health Declaration
+                </h4>
+                <div>
+                  <label className="text-xs text-gray-600 block mb-1">General Notes</label>
+                  <textarea
+                    value={form.healthDeclaration}
+                    onChange={(e) => setForm({...form, healthDeclaration: e.target.value})}
+                    rows={2}
+                    placeholder="Allergies, recent illnesses, or other notes..."
+                    className="w-full p-2 border rounded text-sm resize-none"
+                  />
+                </div>
+              </div>
+
+              {/* Health Questions */}
+              <div className="border-b pb-3">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Health Screening Questions *</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto">
+                  {healthQuestionsList.map((q) => (
+                    <div key={q.id} className="flex items-center justify-between p-2 border rounded text-xs">
+                      <div className="flex-1 pr-2">{q.text}</div>
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1">
+                          <input
+                            type="radio"
+                            name={q.id}
+                            value="yes"
+                            checked={healthAnswers[q.id] === 'yes'}
+                            onChange={() => setHealthAnswers((h) => ({ ...h, [q.id]: 'yes' }))}
+                          />
+                          <span>Yes</span>
+                        </label>
+                        <label className="flex items-center gap-1">
+                          <input
+                            type="radio"
+                            name={q.id}
+                            value="no"
+                            checked={healthAnswers[q.id] === 'no'}
+                            onChange={() => setHealthAnswers((h) => ({ ...h, [q.id]: 'no' }))}
+                          />
+                          <span>No</span>
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Color & Status */}
+              <div className="border-b pb-3">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Additional Settings</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-600 block mb-2">Calendar Color</label>
+                    <div className="flex flex-wrap gap-2">
+                      {colorOptions.map((color) => (
+                        <button
+                          key={color.value}
+                          type="button"
+                          onClick={() => setForm({ ...form, color: color.value })}
+                          className={`w-10 h-10 rounded border-2 transition-all ${
+                            form.color === color.value ? 'border-gray-800 scale-110' : 'border-gray-300'
+                          }`}
+                          style={{ backgroundColor: color.value }}
+                          title={color.name}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-gray-600 block mb-1">Status</label>
+                    <select
+                      value={form.status}
+                      onChange={(e) => setForm({...form, status: e.target.value})}
+                      className="w-full p-2 border rounded text-sm"
+                    >
+                      <option value="confirmed">Confirmed</option>
+                      <option value="pending">Pending</option>
+                      <option value="treated">Treated</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddWalkInModal(false);
+                    resetForm();
+                  }}
+                  className="px-4 py-2 bg-gray-400 text-white rounded hover:bg-gray-500"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddAppointment}
+                  className="px-4 py-2 bg-red-700 text-white rounded hover:bg-red-800"
+                >
+                  Create Walk-in
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
